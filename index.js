@@ -102,16 +102,16 @@ export function apply(ctx, config = {}) {
         async handler(invocation) {
           try {
             const raw = String(invocation?.rawInput ?? '').trim();
-            if (raw === 'ledger') return formatLedger();
-            if (raw === 'audit') return formatAudit(await audit({ persist: true }));
+            if (raw === 'ledger') return { kind: 'success', text: formatLedger() };
+            if (raw === 'audit') return { kind: 'success', text: formatAudit(await audit({ persist: true })) };
             if (raw === 'freshness' || raw.startsWith('freshness ')) {
               const only = raw.slice('freshness'.length).trim().split(/\s+/)[0];
-              return formatFreshness(await freshness({ names: only ? [only] : null }));
+              return { kind: 'success', text: formatFreshness(await freshness({ names: only ? [only] : null })) };
             }
             const target = raw && !ACTIONS.includes(raw) ? raw : null;
-            return formatReport(await analyze({ target, persist: true }));
+            return { kind: 'success', text: formatReport(await analyze({ target, persist: true })) };
           } catch (error) {
-            return `兼容闸门出错：${error?.message ?? error}`;
+            return { kind: 'error', text: `兼容闸门出错：${error?.message ?? error}` };
           }
         },
       });

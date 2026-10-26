@@ -58,7 +58,11 @@ for (const [k, v] of Object.entries(results)) console.log(`   ${k} → ${v}`);
 assert.equal(commands.length, 1, '应注册 1 个斜杠命令');
 assert.equal(commands[0].name, 'compat');
 const out = await commands[0].handler({ rawInput: 'audit' });
-assert.equal(typeof out, 'string');
+  assert.equal(typeof out, 'object', 'handler 必须返回 CommandResult 对象，不能返回字符串');
+  assert.equal(out.kind, 'success', 'handler 的 kind 应为 success');
+  assert.ok(typeof out.text === 'string' && out.text.length > 0, 'handler 应带 text');
+  const bad = await commands[0].handler({ rawInput: 'freshness __不存在的包__' });
+  assert.ok(['success', 'error'].includes(bad.kind), 'kind 只能是 success / error');
 console.log('✓ /compat 命令已注册且 handler 可调用');
 
 // ── disposer 可用 ──
