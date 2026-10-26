@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.1';
+    const VERSION = '0.2.2';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -159,10 +159,15 @@ window.__ModuleLoader__.load({
      */
     function CompatGateBadge(props) {
       const view = props && typeof props.useProjection === 'function' ? props.useProjection(PROJECTION_KEY) : null;
+      const action = view && view.verdict ? view.verdict.action : null;
+      // 全部相容时干脆不出现：标签页已经常驻在会话顶部，再来一枚"全部相容"就是噪音。
+      const riskyCount = ((view && view.counts && view.counts.break) || 0) + ((view && view.counts && view.counts.unknown) || 0);
+      if (!view || view.ok === false) return null;
+      if (action === 'safe' && riskyCount === 0) return null;
       const tone = toneOf(view);
       const counts = (view && view.counts) || {};
       const risky = (counts.break || 0) + (counts.unknown || 0);
-      const text = LABEL + ' · ' + (risky ? risky + ' 项待看' : '全部相容');
+      const text = LABEL + ' · ' + (risky ? risky + ' 项待看' : '需留意');
       const base = {
         display: 'inline-flex', alignSelf: 'flex-start', flex: '0 0 auto', width: 'fit-content', maxWidth: '100%',
         alignItems: 'center', gap: 6, margin: '0 0 4px 0', padding: '2px 9px', fontSize: 12, lineHeight: 1.5,

@@ -95,14 +95,20 @@ for (const [label, props] of cases) {
 // 徽章在"全部相容"和"有待看项"两种情况下文案不同
 const Badge = exports_.__internals.CompatGateBadge;
 const badgeRisky = Badge({ useProjection: () => sampleView });
-const badgeClean = Badge({ useProjection: () => ({ ...sampleView, counts: { ok: 5, break: 0, unknown: 0 } }) });
+const cleanView = {
+  ...sampleView,
+  counts: { ok: 5, break: 0, unknown: 0 },
+  verdict: { ...sampleView.verdict, action: 'safe' },
+};
+const badgeClean = Badge({ useProjection: () => cleanView });
 const textOf = (node) => {
   if (node == null || typeof node !== 'object') return String(node ?? '');
   if (Array.isArray(node)) return node.map(textOf).join('');
   return (node.children ?? []).map(textOf).join('');
 };
 assert.match(textOf(badgeRisky), /1 项待看/);
-assert.match(textOf(badgeClean), /全部相容/);
+assert.equal(badgeClean, null, '全部相容时徽章不出现，避免和常驻标签页重复');
+assert.equal(Badge({ useProjection: () => ({ ok: false, reason: 'no-status' }) }), null, '没有数据时徽章也不出现');
 
 // 文案助手
 const { describeVerdict, describeTarget, toneOf, timeText } = exports_.__internals;

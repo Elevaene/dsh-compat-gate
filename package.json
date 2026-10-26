@@ -1,6 +1,6 @@
 {
   "name": "dsh-compat-gate",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Pre-update compatibility gate for dsh: tells you whether your installed plugins still work on the next dsh release, before you update.",
   "type": "module",
   "main": "index.js",
