@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.2';
+    const VERSION = '0.2.3';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -36,6 +36,54 @@ window.__ModuleLoader__.load({
       unknown: { fg: '#94a3b8', bg: 'rgba(148,163,184,0.12)', tag: '无法判定' },
     };
     const STATUS_TONE = { OK: '#10b981', BREAK: '#ef4444', UNKNOWN: '#94a3b8' };
+
+    // ── 我已知晓：把“看过了”记在浏览器本地；指纹不变就不再弹徽章 ──
+    const ACK_KEY = PLUGIN_ID + '/ack';
+    const ackListeners = new Set();
+    const useStateHook = typeof react.useState === 'function' ? react.useState : null;
+    const useEffectHook = typeof react.useEffect === 'function' ? react.useEffect : null;
+
+    /** 订阅“已知晓状态变化”，让徽章与面板一起刷新；测试用的假 react 没有 hook，直接跳过。 */
+    function useAckTick() {
+      if (!useStateHook) return 0;
+      const [tick, setTick] = useStateHook(0);
+      if (useEffectHook) {
+        useEffectHook(() => {
+          const bump = () => setTick((n) => n + 1);
+          ackListeners.add(bump);
+          return () => ackListeners.delete(bump);
+        }, []);
+      }
+      return tick;
+    }
+
+    /** 指纹：宿主版本 + 目标版本 + 每个插件的名字@版本@结论。任一处变化都算新情况，徽章要回来。 */
+    function fingerprintOf(view) {
+      if (!view || view.ok === false) return '';
+      const host = (view.host && view.host.version) || '-';
+      const target = (view.target && view.target.version) || '-';
+      const parts = (Array.isArray(view.plugins) ? view.plugins : [])
+        .map((p) => (p.name || '?') + '@' + (p.version || '?') + ':' + (p.status || '?'))
+        .sort();
+      return host + '|' + target + '|' + parts.join(',');
+    }
+
+    function readAck() {
+      try { return window.localStorage.getItem(ACK_KEY) || ''; } catch (error) { return ''; }
+    }
+
+    function writeAck(value) {
+      try {
+        if (value) window.localStorage.setItem(ACK_KEY, value);
+        else window.localStorage.removeItem(ACK_KEY);
+      } catch (error) { /* 没有 localStorage 就退化成每次都提醒 */ }
+      ackListeners.forEach((fn) => fn());
+    }
+
+    function acknowledged(view) {
+      const fp = fingerprintOf(view);
+      return fp !== '' && readAck() === fp;
+    }
 
     function toneOf(view) {
       const action = view && view.verdict && view.verdict.action ? view.verdict.action : 'unknown';
@@ -121,12 +169,34 @@ window.__ModuleLoader__.load({
           ' 生成一次结果，之后这里会自动显示最新结论（执行命令不消耗额度）。'));
     }
 
+    /** “我已知晓”一行：确认过就把徽章收起来，指纹一变自动恢复提醒。 */
+    function AckRow(props) {
+      const view = props.view;
+      const fp = fingerprintOf(view);
+      const acked = fp !== '' && readAck() === fp;
+      const action = view && view.verdict ? view.verdict.action : null;
+      if (!acked && action === 'safe') return null;
+      const tint = acked ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)';
+      const line = acked
+        ? '已标记知晓：徽章先不出现，等 dsh 或插件下次变化再说。'
+        : '看过了？点右边，输入框上方那枚徽章就不再出现，直到 dsh 或插件下次变化。';
+      return el('div', { style: { marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 } },
+        el('span', { style: { opacity: 0.72, flex: '1 1 auto', minWidth: 0 } }, line),
+        el('button', {
+          type: 'button',
+          onClick: () => writeAck(acked ? '' : fp),
+          style: { font: 'inherit', fontSize: 12, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+            border: '1px solid rgba(148,163,184,0.45)', background: tint, color: 'inherit', whiteSpace: 'nowrap' },
+        }, acked ? '取消标记' : '我已知晓'));
+    }
+
     function CompatGatePanel(props) {
       const view = props && typeof props.useProjection === 'function' ? props.useProjection(PROJECTION_KEY) : null;
       if (!view || view.ok === false) return el(EmptyHint, { view });
       const tone = toneOf(view);
       const audit = view.audit;
       const plugins = Array.isArray(view.plugins) ? view.plugins : [];
+      useAckTick();
       return el('div', { style: { padding: 16, fontFamily: 'inherit', color: 'inherit', lineHeight: 1.6, overflow: 'auto' } },
         el('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
           el('div', { style: { fontSize: 16, fontWeight: 700 } }, LABEL),
@@ -148,6 +218,7 @@ window.__ModuleLoader__.load({
               el('div', { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, '已安装插件（' + plugins.length + '）'),
               el('div', null, plugins.map((p, i) => el(PluginRow, { key: p.name + ':' + i, plugin: p, index: i }))))
           : null,
+        el(AckRow, { key: 'ack', view }),
         el('div', { style: { marginTop: 14, fontSize: 12, opacity: 0.55, display: 'flex', gap: 12, flexWrap: 'wrap' } },
           el('span', null, timeText(view) ? '更新于 ' + timeText(view) : '尚未更新'),
           el('span', null, '在会话里执行 /compat 刷新，不消耗额度')));
@@ -164,6 +235,8 @@ window.__ModuleLoader__.load({
       const riskyCount = ((view && view.counts && view.counts.break) || 0) + ((view && view.counts && view.counts.unknown) || 0);
       if (!view || view.ok === false) return null;
       if (action === 'safe' && riskyCount === 0) return null;
+      useAckTick();
+      if (acknowledged(view)) return null;
       const tone = toneOf(view);
       const counts = (view && view.counts) || {};
       const risky = (counts.break || 0) + (counts.unknown || 0);
@@ -213,7 +286,7 @@ window.__ModuleLoader__.load({
     exports.name = PLUGIN_ID;
     exports.inject = inject;
     exports.apply = apply;
-    exports.__internals = { describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, PROJECTION_KEY, VIEW_ID };
+    exports.__internals = { describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow, fingerprintOf, acknowledged, PROJECTION_KEY, VIEW_ID };
     return module.exports;
   },
 });

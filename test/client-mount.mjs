@@ -11,6 +11,13 @@ globalThis.window = {
     load(definition) { loaded = definition; },
   },
 };
+// 假的 localStorage：只支持“我已知晓”用到的 get/set/remove
+const ackStore = new Map();
+globalThis.window.localStorage = {
+  getItem: (key) => (ackStore.has(key) ? ackStore.get(key) : null),
+  setItem: (key, value) => { ackStore.set(key, String(value)); },
+  removeItem: (key) => { ackStore.delete(key); },
+};
 
 const react = {
   createElement: (type, props, ...children) => ({ $$el: true, type, props: props ?? null, children }),
@@ -137,4 +144,42 @@ assert.equal(noOpen.type, 'span');
 assert.equal(noOpen.props.onClick, undefined);
 assert.equal(typeof noOpen.props.title, 'string');
 
-console.log('client 挂载测试通过：2 个槽位（session 作用域）/ 5 种数据状态 / 徽章文案与可点性 / 文案助手');
+
+// ── 我已知晓：确认后徽章不再出现；dsh 或插件一变，徽章自动回来 ──
+const { fingerprintOf, acknowledged, AckRow, CompatGatePanel } = exports_.__internals;
+const fp = fingerprintOf(sampleView);
+assert.match(fp, /^0.2.1-rc.2|0.2.1-rc.3|/, '指纹要以宿主与目标版本开头');
+assert.ok(fp.includes('billion-context@0.1.208:UNKNOWN'), '指纹要带插件版本与结论');
+assert.equal(fingerprintOf({ ok: false }), '', '没有结果时指纹为空，不应该被当成已知晓');
+
+assert.ok(Badge({ useProjection: () => sampleView }), '没确认过时徽章要出现');
+const ackRowBefore = AckRow({ view: sampleView });
+assert.match(textOf(ackRowBefore), /我已知晓/);
+assert.equal(ackRowBefore.children[1].type, 'button');
+ackRowBefore.children[1].props.onClick();
+assert.equal(acknowledged(sampleView), true, '点过之后必须记住');
+assert.equal(Badge({ useProjection: () => sampleView }), null, '已知晓后徽章不再出现');
+assert.match(textOf(AckRow({ view: sampleView })), /取消标记/, '确认后按钮变成取消标记');
+
+// 插件版本变了 → 指纹不同 → 徽章自己回来
+const changedView = { ...sampleView, plugins: [{ name: 'billion-context', version: '0.1.209', status: 'UNKNOWN' }] };
+assert.equal(acknowledged(changedView), false, '插件版本变了就不算同一个已知晓');
+assert.ok(Badge({ useProjection: () => changedView }), '出现新情况时徽章要重新出现');
+
+// 取消标记
+AckRow({ view: sampleView }).children[1].props.onClick();
+assert.equal(acknowledged(sampleView), false);
+assert.ok(Badge({ useProjection: () => sampleView }));
+
+// 面板里必须能看到这一行
+// 假 react 不会真的调用子组件，所以要遍历元素树找 AckRow，而不是取父元素文字
+const hasComponent = (node, type) => {
+  if (node == null || typeof node !== 'object') return false;
+  if (node.type === type) return true;
+  return (node.children ?? []).some((child) => hasComponent(child, type));
+};
+assert.ok(hasComponent(CompatGatePanel({ useProjection: () => sampleView }), AckRow), '面板里必须挂上“我已知晓”那一行');
+const safePanel = CompatGatePanel({ useProjection: () => cleanView });
+assert.ok(safePanel, '全部相容时面板仍可渲染');
+
+console.log('client 挂载测试通过：2 个槽位（session 作用域）/ 5 种数据状态 / 徽章文案与可点性 / 我已知晓 / 文案助手');
