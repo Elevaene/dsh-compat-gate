@@ -1,0 +1,45 @@
+{
+    "name":  "dsh-compat-gate",
+    "version":  "0.1.0",
+    "description":  "Pre-update compatibility gate for dsh: tells you whether your installed plugins still work on the next dsh release, before you update.",
+    "type":  "module",
+    "main":  "index.js",
+    "exports":  {
+                    ".":  "./index.js",
+                    "./package.json":  "./package.json",
+                    "./cordis.patch.yml":  "./cordis.patch.yml"
+                },
+    "files":  [
+                  "index.js",
+                  "lib",
+                  "cordis.patch.yml",
+                  "README.md"
+              ],
+    "scripts":  {
+                    "test":  "node test/semver-diff.mjs \u0026\u0026 node test/audit-diff.mjs \u0026\u0026 node test/mount.mjs \u0026\u0026 node test/freshness.mjs"
+                },
+    "engines":  {
+                    "node":  "\u003e=20.3.0"
+                },
+    "dsh":  {
+                "bundle":  {
+                               "patch":  "./cordis.patch.yml"
+                           },
+                "compatibility":  {
+                                      "dsh":  "\u003e=0.2.1-rc.1"
+                                  }
+            },
+    "license":  "MIT",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/Elevaene/dsh-compat-gate.git"
+                   },
+    "homepage":  "https://github.com/Elevaene/dsh-compat-gate#readme",
+    "keywords":  [
+                     "dsh",
+                     "dsh-plugin",
+                     "compatibility",
+                     "semver",
+                     "pnpm"
+                 ]
+}

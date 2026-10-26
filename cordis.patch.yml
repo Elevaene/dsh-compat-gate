@@ -1,0 +1,11 @@
+# dsh bundle patch：把兼容闸门挂进宿主（纯主机侧插件：注册 compat_gate 工具 + /compat 命令）。
+#
+# 它只读不写业务数据：读 $DSH_HOME/profiles/<name>/package.json 与各插件 package.json 的兼容声明、
+# 读 resources/app-update.yml 找出更新通道并拉取该通道的 yml，结果记进本插件目录下的 data/ledger.json。
+#
+# 需要覆盖时在 profile 自己的 cordis.patch.yml 里写：
+# - id: dsh-compat-gate
+#   config: {}
+- insert:
+    - id: dsh-compat-gate
+      name: dsh-compat-gate
