@@ -280,3 +280,12 @@ delete globalThis.window.top;
 assert.equal(updateBridge(), null, '哪一级都没有就返回 null');
 
 console.log('v0.2.6 通过：桥多级查找 / 现场自证 / 存储探测');
+// ── v0.2.7：没有复核结果时也要显示账本里真实的「上次记录宿主」 ──
+const noAuditView = { ...breakView, audit: undefined, lastHost: '0.2.1-rc.1' };
+const noAuditText = textOf(CompatGatePanel({ useProjection: () => noAuditView }));
+assert.match(noAuditText, /上次记录宿主 0.2.1-rc.1/, '没有复核结果时显示账本里的真实版本，不是短横');
+assert.match(noAuditText, /当前 0.2.1-rc.2/, '当前宿主取快照里的版本');
+assert.match(noAuditText, /（已变化）/, '账本版本与当前不同时要标已变化');
+const noLedgerView = { ...breakView, audit: undefined, lastHost: null };
+assert.match(textOf(CompatGatePanel({ useProjection: () => noLedgerView })), /上次记录宿主 —/, '账本真没有记录时才显示短横');
+console.log('v0.2.7 通过：账本上次宿主回填');

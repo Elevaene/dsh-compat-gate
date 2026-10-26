@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.6';
+const VERSION = '0.2.7';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -445,6 +445,10 @@ window.__ModuleLoader__.load({
       if (!view || view.ok === false) return el(EmptyHint, { view });
       const tone = toneOf(view);
       const audit = view.audit;
+      // 没有复核结果时也把账本里记的真实宿主显示出来，别让两格退化成短横让人误会
+      const auditHost = (audit && audit.hostVersion) || (view.host && view.host.version) || '—';
+      const auditLastHost = (audit && audit.previousHost) || view.lastHost || '—';
+      const auditChanged = audit ? audit.versionChanged === true : Boolean(view.lastHost && view.host && view.host.version && view.lastHost !== view.host.version);
       const plugins = Array.isArray(view.plugins) ? view.plugins : [];
       const ages = ageItemsOf(view);
       useAckTick();
@@ -465,13 +469,15 @@ window.__ModuleLoader__.load({
               background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)' } },
               el('div', null, '⚠ ' + ages.length + ' 个插件的新版还在 pnpm 等待期内，现在装会被拒'),
               ages.map((item, i) => el('div', { key: 'age' + i, style: { marginTop: 2, opacity: 0.9 } },
-                item.name + (item.version ? '@' + item.version : '') + ' 还要等 ' + describeWait(item.remainingMs)))) : null,
-        audit ? el('div', { style: { marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(148,163,184,0.1)', fontSize: 13 } },
+                item.name + (item.version ? '@' + item.version : '') + ' 还要等 ' + describeWait(item)))) : null,
+        el('div', { style: { marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(148,163,184,0.1)', fontSize: 13 } },
           el('div', { style: { fontWeight: 600 } }, '更新后复核'),
-          el('div', null, '上次记录宿主 ' + (audit.previousHost || '—') + '，当前 ' + (audit.hostVersion || '—') + (audit.versionChanged ? '（已变化）' : '（未变化）')),
-          audit.broken && audit.broken.length
-            ? el('div', { style: { marginTop: 4 } }, '确认失效：' + audit.broken.map((b) => b.name + (b.version ? '@' + b.version : '')).join('、'))
-            : el('div', { style: { marginTop: 4, opacity: 0.75 } }, '没有发现失效插件')) : null,
+          el('div', null, '上次记录宿主 ' + auditLastHost + '，当前 ' + auditHost + (auditChanged ? '（已变化）' : '（未变化）')),
+          audit
+            ? (audit.broken && audit.broken.length
+              ? el('div', { style: { marginTop: 4 } }, '确认失效：' + audit.broken.map((b) => b.name + (b.version ? '@' + b.version : '')).join('、'))
+              : el('div', { style: { marginTop: 4, opacity: 0.75 } }, '没有发现失效插件'))
+            : el('div', { style: { marginTop: 4, opacity: 0.75 } }, '这次运行宿主没变，不做复核；上面那个就是账本里记的版本')),
         plugins.length
           ? el('div', { style: { marginTop: 14 } },
               el('div', { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, '已安装插件（' + plugins.length + '）'),
