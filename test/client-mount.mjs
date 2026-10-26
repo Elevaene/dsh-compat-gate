@@ -124,9 +124,10 @@ for (const [label, props] of cases) {
   }
 }
 
-// 徽章在"全部相容"和"有待看项"两种情况下文案不同
+// 徽章只在"真的会有插件失效"时出现；单纯"无法判断"是常态，不进徽章
 const Badge = exports_.__internals.CompatGateBadge;
-const badgeRisky = Badge({ useProjection: () => sampleView });
+const breakView = { ...sampleView, counts: { ok: 3, break: 1, unknown: 1 } };
+const badgeRisky = Badge({ useProjection: () => breakView });
 const cleanView = {
   ...sampleView,
   counts: { ok: 5, break: 0, unknown: 0 },
@@ -138,7 +139,8 @@ const textOf = (node) => {
   if (Array.isArray(node)) return node.map(textOf).join('');
   return (node.children ?? []).map(textOf).join('');
 };
-assert.match(textOf(badgeRisky), /1 项待看/);
+assert.match(textOf(badgeRisky), /1 个会失效/);
+assert.equal(Badge({ useProjection: () => sampleView }), null, '只有"无法判断"时不冒徽章，重启不再天天弹');
 assert.equal(badgeClean, null, '全部相容时徽章不出现，避免和常驻标签页重复');
 assert.equal(Badge({ useProjection: () => ({ ok: false, reason: 'no-status' }) }), null, '没有数据时徽章也不出现');
 
@@ -159,12 +161,12 @@ assert.equal(timeText({}), null);
 
 // 徽章点击必须调用 openView，否则面板打不开
 let opened = null;
-const clickable = Badge({ useProjection: () => sampleView, openView: (id, arg) => { opened = [id, arg]; } });
+const clickable = Badge({ useProjection: () => breakView, openView: (id, arg) => { opened = [id, arg]; } });
 clickable.props.onClick();
 assert.deepEqual(opened, ['compat-gate', '']);
 
 // dock 槽标准属性里没有 openView：必须渲染成不可点的 span，而不是点了没反应的按钮
-const noOpen = Badge({ useProjection: () => sampleView });
+const noOpen = Badge({ useProjection: () => breakView });
 assert.equal(noOpen.type, 'span');
 assert.equal(noOpen.props.onClick, undefined);
 assert.equal(typeof noOpen.props.title, 'string');
@@ -177,24 +179,24 @@ assert.match(fp, /^0.2.1-rc.2|0.2.1-rc.3|/, '指纹要以宿主与目标版本�
 assert.ok(fp.includes('billion-context@0.1.208:UNKNOWN'), '指纹要带插件版本与结论');
 assert.equal(fingerprintOf({ ok: false }), '', '没有结果时指纹为空，不应该被当成已知晓');
 
-assert.ok(Badge({ useProjection: () => sampleView }), '没确认过时徽章要出现');
+assert.ok(Badge({ useProjection: () => breakView }), '没确认过时徽章要出现');
 const ackRowBefore = AckRow({ view: sampleView });
 assert.match(textOf(ackRowBefore), /我已知晓/);
 assert.equal(ackRowBefore.children[1].type, 'button');
 ackRowBefore.children[1].props.onClick();
 assert.equal(acknowledged(sampleView), true, '点过之后必须记住');
-assert.equal(Badge({ useProjection: () => sampleView }), null, '已知晓后徽章不再出现');
+assert.equal(Badge({ useProjection: () => breakView }), null, '已知晓后徽章不再出现');
 assert.match(textOf(AckRow({ view: sampleView })), /取消标记/, '确认后按钮变成取消标记');
 
 // 插件版本变了 → 指纹不同 → 徽章自己回来
-const changedView = { ...sampleView, plugins: [{ name: 'billion-context', version: '0.1.209', status: 'UNKNOWN' }] };
+const changedView = { ...breakView, plugins: [{ name: 'billion-context', version: '0.1.209', status: 'UNKNOWN' }] };
 assert.equal(acknowledged(changedView), false, '插件版本变了就不算同一个已知晓');
 assert.ok(Badge({ useProjection: () => changedView }), '出现新情况时徽章要重新出现');
 
 // 取消标记
 AckRow({ view: sampleView }).children[1].props.onClick();
 assert.equal(acknowledged(sampleView), false);
-assert.ok(Badge({ useProjection: () => sampleView }));
+assert.ok(Badge({ useProjection: () => breakView }));
 
 // 面板里必须能看到这一行
 // 假 react 不会真的调用子组件，所以要遍历元素树找 AckRow，而不是取父元素文字
@@ -231,9 +233,9 @@ const opsRow = findPluginRow(CompatGatePanel({ useProjection: () => sampleView }
 assert.ok(opsRow, '插件行必须渲染');
 assert.equal(opsRow.props.plugin.fix, 'dsh plugin --profile web add dsh-ops@0.4.2', '插件行要带上修复命令');
 
-const badge = Badge({ useProjection: () => sampleView });
+const badge = Badge({ useProjection: () => breakView });
 assert.match(textOf(badge), /等待期 1/, '徽章文案要带上还在等待期的版本数');
-assert.ok(!textOf(Badge({ useProjection: () => ({ ...sampleView, releaseAge: { items: [] } }) })).includes('等待期'), '没有等待期就不提');
+assert.ok(!textOf(Badge({ useProjection: () => ({ ...breakView, releaseAge: { items: [] } }) })).includes('等待期'), '没有等待期就不提');
 
 // ── 界面里直接更新 dsh（v0.2.5）：桥只在桌面窗口里有，浏览器打开时要说清原因 ──
 const { UpdateRow, updateBridge, describePhase, startUpdate } = exports_.__internals;
@@ -263,3 +265,18 @@ assert.equal(describePhase(null), '');
 delete globalThis.window.dshDesktop;
 
 console.log('更新按钮测试通过：桥探测 / 按钮文案 / 交给宿主更新器 / 错误与阶段文案');
+
+// ── v0.2.6：桥多级查找 / 现场自证 / 存储降级 ──
+const { ackStorageKind, diagnosticText } = exports_.__internals;
+assert.equal(ackStorageKind(), 'localStorage', '假 localStorage 能用时就用它，不该降级到内存');
+assert.match(diagnosticText(), /^现场：/, '要打印现场，便于判断为什么没有按钮');
+assert.match(diagnosticText(), /dshDesktop/, '现场信息里要交代 dshDesktop 的可见情况');
+
+// 桥挂在顶层窗口时也要找到（真机可能是外壳套了一层）
+const topUpdates = { open: () => Promise.resolve() };
+globalThis.window.top = { dshDesktop: { updates: topUpdates } };
+assert.equal(updateBridge(), topUpdates, '自身窗口没有时去 window.top 找');
+delete globalThis.window.top;
+assert.equal(updateBridge(), null, '哪一级都没有就返回 null');
+
+console.log('v0.2.6 通过：桥多级查找 / 现场自证 / 存储探测');

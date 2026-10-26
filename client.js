@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.5';
+    const VERSION = '0.2.6';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -68,15 +68,79 @@ window.__ModuleLoader__.load({
       return host + '|' + target + '|' + parts.join(',');
     }
 
+    // 自定义协议的原点（dsh-app://app）上 localStorage 可能根本没生效，退路依次是 cookie、进程内内存。
+    const ACK_COOKIE = 'dsh_compat_gate_ack';
+    const ackMemory = new Map();
+    let ackKindCache = '';
+
+    function ackBackends() {
+      const win = typeof window === 'undefined' ? null : window;
+      const doc = typeof document === 'undefined' ? null : document;
+      const list = [];
+      if (win && win.localStorage) {
+        list.push({
+          kind: 'localStorage',
+          read: () => win.localStorage.getItem(ACK_KEY) || '',
+          write: (value) => {
+            if (value) win.localStorage.setItem(ACK_KEY, value);
+            else win.localStorage.removeItem(ACK_KEY);
+          },
+        });
+      }
+      if (doc && typeof doc.cookie === 'string') {
+        list.push({
+          kind: 'cookie',
+          read: () => {
+            const hit = String(doc.cookie || '').split('; ').filter((part) => part.indexOf(ACK_COOKIE + '=') === 0)[0];
+            return hit ? decodeURIComponent(hit.slice(ACK_COOKIE.length + 1)) : '';
+          },
+          write: (value) => {
+            doc.cookie = ACK_COOKIE + '=' + encodeURIComponent(value) + '; path=/; max-age=' + (value ? 31536000 : 0) + '; SameSite=Lax';
+          },
+        });
+      }
+      list.push({
+        kind: 'memory',
+        read: () => ackMemory.get(ACK_COOKIE) || '',
+        write: (value) => { if (value) ackMemory.set(ACK_COOKIE, value); else ackMemory.delete(ACK_COOKIE); },
+      });
+      return list;
+    }
+
     function readAck() {
-      try { return window.localStorage.getItem(ACK_KEY) || ''; } catch (error) { return ''; }
+      for (const backend of ackBackends()) {
+        try {
+          const value = backend.read();
+          if (value) return value;
+        } catch (error) { /* 这个后端用不了，试下一个 */ }
+      }
+      return '';
+    }
+
+    /** 真正存得进去的那一种存储；面板据此说明“标记只在本次运行有效”。 */
+    function ackStorageKind() {
+      if (ackKindCache) return ackKindCache;
+      const probe = 'probe-' + Date.now();
+      for (const backend of ackBackends()) {
+        try {
+          const before = backend.read();
+          backend.write(probe);
+          const ok = backend.read() === probe;
+          backend.write(before);
+          if (ok) { ackKindCache = backend.kind; return ackKindCache; }
+        } catch (error) { /* 试下一个 */ }
+      }
+      ackKindCache = 'memory';
+      return ackKindCache;
     }
 
     function writeAck(value) {
-      try {
-        if (value) window.localStorage.setItem(ACK_KEY, value);
-        else window.localStorage.removeItem(ACK_KEY);
-      } catch (error) { /* 没有 localStorage 就退化成每次都提醒 */ }
+      for (const backend of ackBackends()) {
+        try {
+          backend.write(value);
+          if (value === '' || backend.read() === value) break;
+        } catch (error) { /* 试下一个 */ }
+      }
       ackListeners.forEach((fn) => fn());
     }
 
@@ -87,13 +151,41 @@ window.__ModuleLoader__.load({
     // ── 在界面里直接更新 dsh：桌面应用把更新器暴露成 window.dshDesktop.updates ──
     /** 只有桌面窗口（dsh-app://app 主框架）才有这个桥；用浏览器打开 profile 时为 null。 */
     function updateBridge() {
+      const win = typeof window === 'undefined' ? null : window;
+      if (!win) return null;
+      const paths = [
+        (w) => w.dshDesktop,
+        (w) => (w.top && w.top !== w ? w.top.dshDesktop : null),
+        (w) => (w.parent && w.parent !== w ? w.parent.dshDesktop : null),
+      ];
+      for (const get of paths) {
+        try {
+          const desktop = get(win);
+          const updates = desktop && desktop.updates;
+          if (updates && typeof updates.open === 'function') return updates;
+        } catch (error) { /* 跨域读不到就试下一条路 */ }
+      }
+      return null;
+    }
+
+    /** 没有更新桥时把现场信息印在面板上，一眼分清“浏览器打开”还是“外壳没暴露接口”。 */
+    function diagnosticText() {
       try {
         const win = typeof window === 'undefined' ? null : window;
-        const updates = win && win.dshDesktop ? win.dshDesktop.updates : null;
-        if (!updates || typeof updates.open !== 'function') return null;
-        return updates;
+        const loc = win && win.location ? win.location : null;
+        const page = loc ? String(loc.protocol) + '//' + String(loc.host) : '未知页面';
+        let frame = '主框架';
+        try { frame = win && win.top && win.top !== win ? '在 iframe 里' : '主框架'; } catch (error) { frame = '跨域 iframe'; }
+        let desktop = 'dshDesktop 无';
+        try {
+          if (win && win.dshDesktop) {
+            const keys = Object.keys(win.dshDesktop);
+            desktop = 'dshDesktop: ' + (keys.length ? keys.join('/') : '空对象');
+          }
+        } catch (error) { desktop = 'dshDesktop 读不到'; }
+        return '现场：' + page + ' · ' + frame + ' · ' + desktop;
       } catch (error) {
-        return null;
+        return '现场：读取失败';
       }
     }
 
@@ -191,8 +283,9 @@ window.__ModuleLoader__.load({
       const wrap = { marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 };
       const hint = { opacity: 0.72, flex: '1 1 auto', minWidth: 0 };
       if (!bridge) {
-        return el('div', { style: wrap },
-          el('span', { style: hint }, '在浏览器里打开时没法直接更新，这个按钮只在桌面应用窗口里可用。'));
+        return el('div', { style: { marginTop: 10, display: 'block', fontSize: 12 } },
+          el('div', { style: hint }, '这里没法直接更新：没拿到桌面应用的更新接口，请在应用菜单里更新 dsh。'),
+          el('div', { style: { marginTop: 2, opacity: 0.45, fontSize: 11 } }, diagnosticText()));
       }
       const label = changed ? '更新 dsh 到 ' + targetVersion : '检查 dsh 更新';
       const buttonStyle = {
@@ -333,9 +426,10 @@ window.__ModuleLoader__.load({
       const action = view && view.verdict ? view.verdict.action : null;
       if (!acked && action === 'safe') return null;
       const tint = acked ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)';
-      const line = acked
+      const line = (acked
         ? '已标记知晓：徽章先不出现，等 dsh 或插件下次变化再说。'
-        : '看过了？点右边，输入框上方那枚徽章就不再出现，直到 dsh 或插件下次变化。';
+        : '看过了？点右边，输入框上方那枚徽章就不再出现，直到 dsh 或插件下次变化。')
+        + (ackStorageKind() === 'memory' ? '（这台机器的页面存储用不了，标记只在本次运行有效）' : '');
       return el('div', { style: { marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 } },
         el('span', { style: { opacity: 0.72, flex: '1 1 auto', minWidth: 0 } }, line),
         el('button', {
@@ -365,6 +459,7 @@ window.__ModuleLoader__.load({
         el('div', { style: { marginTop: 4, fontSize: 13, opacity: 0.85 } }, describeVerdict(view)),
         el(UpdateRow, { key: 'update', view }),
         countRow(view),
+        el(AckRow, { key: 'ack', view }),
         ages.length
           ? el('div', { style: { marginTop: 10, padding: '6px 10px', borderRadius: 8, fontSize: 12, color: '#b45309',
               background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)' } },
@@ -382,7 +477,6 @@ window.__ModuleLoader__.load({
               el('div', { style: { fontSize: 12, opacity: 0.6, marginBottom: 4 } }, '已安装插件（' + plugins.length + '）'),
               el('div', null, plugins.map((p, i) => el(PluginRow, { key: p.name + ':' + i, plugin: p, index: i }))))
           : null,
-        el(AckRow, { key: 'ack', view }),
         el('div', { style: { marginTop: 14, fontSize: 12, opacity: 0.55, display: 'flex', gap: 12, flexWrap: 'wrap' } },
           el('span', null, timeText(view) ? '更新于 ' + timeText(view) : '尚未更新'),
           el('span', null, '在会话里执行 /compat 刷新，不消耗额度')));
@@ -396,16 +490,14 @@ window.__ModuleLoader__.load({
       const view = props && typeof props.useProjection === 'function' ? props.useProjection(PROJECTION_KEY) : null;
       const action = view && view.verdict ? view.verdict.action : null;
       // 全部相容时干脆不出现：标签页已经常驻在会话顶部，再来一枚"全部相容"就是噪音。
-      const riskyCount = ((view && view.counts && view.counts.break) || 0) + ((view && view.counts && view.counts.unknown) || 0);
+      const breakCount = (view && view.counts && view.counts.break) || 0;
       if (!view || view.ok === false) return null;
-      if (action === 'safe' && riskyCount === 0) return null;
+      if (breakCount === 0) return null;
       useAckTick();
       if (acknowledged(view)) return null;
       const tone = toneOf(view);
-      const counts = (view && view.counts) || {};
-      const risky = (counts.break || 0) + (counts.unknown || 0);
       const ages = ageItemsOf(view);
-      const text = LABEL + ' · ' + (risky ? risky + ' 项待看' : '需留意') + (ages.length ? ' · 等待期 ' + ages.length : '');
+      const text = LABEL + ' · ' + breakCount + ' 个会失效' + (ages.length ? ' · 等待期 ' + ages.length : '');
       const base = {
         display: 'inline-flex', alignSelf: 'flex-start', flex: '0 0 auto', width: 'fit-content', maxWidth: '100%',
         alignItems: 'center', gap: 6, margin: '0 0 4px 0', padding: '2px 9px', fontSize: 12, lineHeight: 1.5,
@@ -454,7 +546,7 @@ window.__ModuleLoader__.load({
     exports.__internals = {
       describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow,
       fingerprintOf, acknowledged, ageItemsOf, describeWait, PluginRow, PROJECTION_KEY, VIEW_ID,
-      UpdateRow, updateBridge, describePhase, startUpdate,
+      UpdateRow, updateBridge, describePhase, startUpdate, ackStorageKind, diagnosticText,
     };
     return module.exports;
   },
