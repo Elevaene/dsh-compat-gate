@@ -26,6 +26,8 @@ dsh 生态里，宿主和插件各自跑各自的版本线。每次 dsh 提示"�
 - **零依赖** —— 只 import `node:*` 内置模块。插件经由 symlink 装进 profile 时，从真实路径出发找不到宿主 node_modules，所以不 import 任何 `@deepseek-ai/*`。
 - **自带 semver 子集** —— 以 node-semver 为基准做完差分测试（1184 组，0 处不一致），而不是抄一个近似实现。
 
+- **Web 面板**：侧栏与输入区显示最近一次判定，不用敲命令，也不消耗额度。
+
 ## 快速开始
 
 需要 Node.js `>= 20.3.0`，dsh `>= 0.2.1-rc.1`。
@@ -100,8 +102,22 @@ dshmarket               1.70.2     相容      声明：^0.1.0-rc.7 || ^0.1.1-rc
 说明：可以更新：已声明的插件全部相容，但有 1 个插件没有兼容声明，无法静态判断（方案 A：不实测加载）。
 ```
 
-## 判定规则
+## 面板（Web UI）
 
+除了敲命令，最近一次判定还会直接显示在界面里：输入框上方一枚状态徽章（点开看详情）、
+侧栏一个「兼容闸门」入口，以及会话视图里的同名标签页。
+
+数据通路是**会话投影**：宿主把结论写进快照，随会话视图下发给浏览器，全程不经过模型，
+所以看面板不消耗额度。快照在两种情况下更新——启动后 3 秒在后台算一次；每次跑完
+`/compat` 或 `compat_gate` 之后。
+
+为什么不用普通的后端接口：插件装进 profile 之后**不能 import 宿主包**
+（`profiles\web\node_modules\@deepseek-ai` 根本不存在，`autoInstallPeers: false`），
+标准的 remote 通道因此用不了；会话投影是唯一零额度、零依赖的通道。
+代价是 `wire.view` 必须是同步纯函数——所以结论先落盘到 `data/status.json`，
+`view` 只做一次带 mtime 缓存的读取，并且永不抛异常（抛了会毁掉整份会话视图）。
+
+## 判定规则
 ### 每个插件三态
 
 - **相容** —— 所有声明范围都包含目标版本。
@@ -175,6 +191,8 @@ npm test
 | `test/audit-diff.mjs` | 伪造账本 + 伪造 0.3.0 宿主夹具，验证 `audit` 精确挑出"更新前相容、更新后失效"的插件 |
 | `test/mount.mjs` | 假 ctx 挂载：工具形状、无损 JSON 输出、命令注册、disposer 注销、缺服务降级 |
 | `test/freshness.mjs` | 等待期窗口四种读法、豁免清单解析、三个判定分支 |
+| `test/projection.mjs` | 投影契约形状、`apply` 纯函数性、缺快照兜底、无损 JSON、快照合并语义 |
+| `test/client-mount.mjs` | 假模块加载器 + 假 ctx：四个槽位注册、五种数据状态下渲染不炸、徽章文案与点击 |
 | `test/matrix.mjs` | 真机多目标版本矩阵（需要真实宿主） |
 | `test/smoke.mjs` | 真机单次冒烟 |
 
@@ -183,10 +201,14 @@ npm test
 ## 目录结构
 
 ```
-index.js            Cordis 插件入口（工具 + 斜杠命令）
+index.js            Cordis 插件入口（工具 + 斜杠命令 + 投影与后台刷新接线）
+client.js           浏览器端：四个槽位、徽章与面板（window.__ModuleLoader__ 包装）
 lib/gate.js         核心：semver 子集、宿主探测、声明解析、判定、账本、发布时效
+lib/status.js       状态快照：把判定结论压成 data/status.json，并给投影提供只读视图
+lib/projection.js   会话投影定义（key = compatGate）
 cordis.patch.yml    bundle 插入声明
 data/ledger.json    账本（运行时生成，已 .gitignore）
+data/status.json    面板用的状态快照（运行时生成，已 .gitignore）
 test/               离线测试与真机冒烟
 ```
 

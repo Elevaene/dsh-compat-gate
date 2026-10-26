@@ -5,8 +5,13 @@
  * （engines.dsh / dsh.compatibility.dsh / peerDependencies 里的 @deepseek-ai/dsh*）
  * 与目标版本做 semver 比对，给出 相容 / 会失效 / 无法判断 三态与更新建议。
  * 不加载、不试跑任何插件（方案 A：无声明者报"无法判断"，不做实测以免误报）。
+ *
+ * 另有一份状态快照（lib/status.js）+ 一个会话投影（lib/projection.js），
+ * 让 Web 客户端不执行命令也能看到最近一次判定的结论；界面在 client.js。
  */
 import { analyze, audit, formatAudit, formatFreshness, formatLedger, formatReport, freshness, PLUGIN_ID } from './lib/gate.js';
+import { compatGateDefinition } from './lib/projection.js';
+import { publishStatus, refreshStatus, summarizeAudit, summarizeReport } from './lib/status.js';
 
 export const name = PLUGIN_ID;
 export const inject = ['tools'];
@@ -35,6 +40,18 @@ function slimReport(report) {
     action: report.verdict.action,
     summary: report.verdict.summary,
     plugins: report.plugins.map((p) => ({ name: p.name, version: p.version, status: p.status, reasons: p.reasons })),
+  };
+}
+
+/** 把 freshness 报告压成面板要用的那一小块。 */
+function slimFreshness(report) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const alerts = rows.filter((row) => row.verdict === 'too-young' || row.verdict === 'holds-lockfile');
+  return {
+    window: { valid: report?.window?.valid === true, minutes: report?.window?.minutes ?? null, source: report?.window?.source ?? null },
+    registry: report?.registry?.url ?? null,
+    counts: report?.counts ?? null,
+    alerts: alerts.map((row) => ({ name: row.name, version: row.version ?? null, verdict: row.verdict, note: row.note ?? null })),
   };
 }
 
@@ -68,11 +85,14 @@ export function apply(ctx, config = {}) {
 
         if (action === 'freshness') {
           const report = await freshness({ names: name ? [name] : null });
+          publishStatus({ freshness: slimFreshness(report) });
           return { action, text: formatFreshness(report), freshness: report };
         }
 
         if (action === 'audit') {
           const result = await audit({ persist });
+          const summarized = summarizeAudit(result);
+          if (summarized) publishStatus(summarized);
           return {
             action,
             text: formatAudit(result),
@@ -83,6 +103,8 @@ export function apply(ctx, config = {}) {
         }
 
         const report = await analyze({ target, persist });
+        const summarized = summarizeReport(report, 'check');
+        if (summarized) publishStatus(summarized);
         return { action, text: formatReport(report), report: slimReport(report) };
       },
     });
@@ -103,13 +125,23 @@ export function apply(ctx, config = {}) {
           try {
             const raw = String(invocation?.rawInput ?? '').trim();
             if (raw === 'ledger') return { kind: 'success', text: formatLedger() };
-            if (raw === 'audit') return { kind: 'success', text: formatAudit(await audit({ persist: true })) };
+            if (raw === 'audit') {
+              const result = await audit({ persist: true });
+              const summarized = summarizeAudit(result);
+              if (summarized) publishStatus(summarized);
+              return { kind: 'success', text: formatAudit(result) };
+            }
             if (raw === 'freshness' || raw.startsWith('freshness ')) {
               const only = raw.slice('freshness'.length).trim().split(/\s+/)[0];
-              return { kind: 'success', text: formatFreshness(await freshness({ names: only ? [only] : null })) };
+              const report = await freshness({ names: only ? [only] : null });
+              publishStatus({ freshness: slimFreshness(report) });
+              return { kind: 'success', text: formatFreshness(report) };
             }
             const target = raw && !ACTIONS.includes(raw) ? raw : null;
-            return { kind: 'success', text: formatReport(await analyze({ target, persist: true })) };
+            const report = await analyze({ target, persist: true });
+            const summarized = summarizeReport(report, 'check');
+            if (summarized) publishStatus(summarized);
+            return { kind: 'success', text: formatReport(report) };
           } catch (error) {
             return { kind: 'error', text: `兼容闸门出错：${error?.message ?? error}` };
           }
@@ -117,4 +149,28 @@ export function apply(ctx, config = {}) {
       });
     });
   } catch { /* 命令注册失败不影响工具面 */ }
+
+  // 会话投影：把快照推给 Web 客户端。宿主没有该服务时静默跳过（可选增强）。
+  try {
+    const projections = ctx.get('sessionProjections');
+    if (projections !== undefined && typeof projections.register === 'function') {
+      ctx.effect(() => projections.register(compatGateDefinition()), `${PLUGIN_ID}: compatGate projection`);
+    }
+  } catch { /* 投影注册失败不影响工具面 */ }
+
+  // 启动后台刷新一次快照：延迟执行且不阻塞加载，失败只记录不打扰。
+  try {
+    ctx.effect(() => {
+      let alive = true;
+      const timer = setTimeout(() => {
+        if (!alive) return;
+        refreshStatus({ timeoutMs: 8000, source: 'startup' }).catch(() => {});
+      }, 3000);
+      if (typeof timer.unref === 'function') timer.unref();
+      return () => {
+        alive = false;
+        clearTimeout(timer);
+      };
+    }, `${PLUGIN_ID}: startup status refresh`);
+  } catch { /* 后台刷新失败不影响加载 */ }
 }

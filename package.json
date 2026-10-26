@@ -1,22 +1,24 @@
 {
   "name": "dsh-compat-gate",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Pre-update compatibility gate for dsh: tells you whether your installed plugins still work on the next dsh release, before you update.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./client": "./client.js",
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "files": [
     "index.js",
+    "client.js",
     "lib",
     "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {
-    "test": "node test/semver-diff.mjs && node test/audit-diff.mjs && node test/mount.mjs && node test/freshness.mjs"
+    "test": "node test/semver-diff.mjs && node test/audit-diff.mjs && node test/mount.mjs && node test/freshness.mjs && node test/projection.mjs && node test/client-mount.mjs"
   },
   "engines": {
     "node": ">=20.3.0"
@@ -24,6 +26,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
     },
     "compatibility": {
       "dsh": ">=0.2.1-rc.1"

@@ -1,5 +1,6 @@
 node_modules/
 backups/
 data/ledger.json
+data/status.json
 *.log
 .DS_Store
