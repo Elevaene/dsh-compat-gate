@@ -52,7 +52,7 @@ const ctx = {
 
 exports_.apply(ctx);
 const slots = registrations.map((r) => r.definition.name);
-assert.deepEqual(slots, ['conversation.input.dock', 'conversation.view', 'sidebar.panellist', 'main']);
+assert.deepEqual(slots, ['conversation.view', 'conversation.input.dock'], '只挂会话视图与 dock 徽章；main / sidebar.panellist 是 root 作用域，拿不到 useProjection');
 for (const r of registrations) {
   assert.equal(typeof r.component, 'function', `${r.definition.name} 必须挂一个组件`);
 }
@@ -60,8 +60,7 @@ const viewReg = registrations.find((r) => r.definition.name === 'conversation.vi
 assert.equal(typeof viewReg.definition.label, 'function');
 assert.equal(viewReg.definition.label(), '兼容闸门');
 assert.equal(typeof viewReg.definition.order, 'number');
-const mainReg = registrations.find((r) => r.definition.name === 'main');
-assert.equal(mainReg.definition.key, 'compat-gate');
+
 
 // ── 组件渲染：四种数据状态都不能抛 ──
 const sampleView = {
@@ -99,6 +98,7 @@ const badgeRisky = Badge({ useProjection: () => sampleView });
 const badgeClean = Badge({ useProjection: () => ({ ...sampleView, counts: { ok: 5, break: 0, unknown: 0 } }) });
 const textOf = (node) => {
   if (node == null || typeof node !== 'object') return String(node ?? '');
+  if (Array.isArray(node)) return node.map(textOf).join('');
   return (node.children ?? []).map(textOf).join('');
 };
 assert.match(textOf(badgeRisky), /1 项待看/);
@@ -125,8 +125,10 @@ const clickable = Badge({ useProjection: () => sampleView, openView: (id, arg) =
 clickable.props.onClick();
 assert.deepEqual(opened, ['compat-gate', '']);
 
-// 没有 openView 时点击不得抛
+// dock 槽标准属性里没有 openView：必须渲染成不可点的 span，而不是点了没反应的按钮
 const noOpen = Badge({ useProjection: () => sampleView });
-noOpen.props.onClick();
+assert.equal(noOpen.type, 'span');
+assert.equal(noOpen.props.onClick, undefined);
+assert.equal(typeof noOpen.props.title, 'string');
 
-console.log('client 挂载测试通过：4 个槽位 / 5 种数据状态 / 徽章文案与点击 / 文案助手');
+console.log('client 挂载测试通过：2 个槽位（session 作用域）/ 5 种数据状态 / 徽章文案与可点性 / 文案助手');

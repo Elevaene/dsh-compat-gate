@@ -115,5 +115,17 @@ assert.equal(summarizedAudit.audit.broken.length, 1);
 assertLossless(summarizedAudit, 'summarizeAudit');
 assert.equal(summarizeAudit({ ok: false, reason: 'no-ledger' }), null);
 
+// ── 7. statusView 对同一份快照必须返回同一个对象（宿主用 Object.is 判断投影变没变）──
+const stableA = statusView(tmpStatus);
+const stableB = statusView(tmpStatus);
+assert.equal(stableA, stableB, '快照没变时必须复用同一个对象，否则每个会话事件都会重推视图');
+publishStatus({ source: 'startup-check' }, tmpStatus);
+const stableC = statusView(tmpStatus);
+assert.notEqual(stableC, stableA, '快照更新后必须换新对象');
+assert.equal(stableC.source, 'startup-check');
+const missingA = statusView(path.join(tmpDir, 'absent.json'));
+const missingB = statusView(path.join(tmpDir, 'absent.json'));
+assert.equal(missingA, missingB, '缺快照时的兜底对象也必须稳定');
+
 // 临时目录由系统回收；按 A2 规则这里不做删除。
-console.log('projection 测试通过：契约形状 / 纯函数 apply / 缺快照兜底 / 无损 JSON / 合并语义 / 压缩摘要');
+console.log('projection 测试通过：契约形状 / 纯函数 apply / 缺快照兜底 / 无损 JSON / 合并语义 / 压缩摘要 / 引用稳定');

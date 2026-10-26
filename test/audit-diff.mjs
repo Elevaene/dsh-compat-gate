@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+// 测试期间把状态快照写到临时文件，别覆盖 data/status.json（那是面板要看的数据）。
+process.env.DSH_COMPAT_GATE_STATUS_FILE = path.join(os.tmpdir(), `compat-gate-${process.pid}-${Date.now()}.json`);
 import { PLUGIN_ROOT, LEDGER, audit, formatAudit } from '../lib/gate.js';
 
 const emptyLedger = { schema: 'dsh-compat-gate/ledger/v1', checks: [] };
