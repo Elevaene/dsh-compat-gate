@@ -1,6 +1,6 @@
 {
   "name": "dsh-compat-gate",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Pre-update compatibility gate for dsh: tells you whether your installed plugins still work on the next dsh release, before you update.",
   "type": "module",
   "main": "index.js",
@@ -18,7 +18,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node test/semver-diff.mjs && node test/audit-diff.mjs && node test/mount.mjs && node test/freshness.mjs && node test/projection.mjs && node test/client-mount.mjs"
+    "test": "node test/semver-diff.mjs && node test/audit-diff.mjs && node test/mount.mjs && node test/freshness.mjs && node test/projection.mjs && node test/client-mount.mjs && node test/upgrade-path.mjs"
   },
   "engines": {
     "node": ">=20.3.0"

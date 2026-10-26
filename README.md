@@ -21,8 +21,11 @@ dsh 生态里，宿主和插件各自跑各自的版本线。每次 dsh 提示"�
 
 - **更新前判定** `check` —— 读 `app-update.yml` 找到更新源，拉取目标版本，逐个插件比对兼容声明，写入账本。
 - **更新后复核** `audit` —— 用当前真实宿主版本重算全部插件，与账本上一次的结论对比，`上次相容 → 现在会失效` 的就是实证失效清单。
+  dsh 更新完第一次启动时会自动跑一次（比对账本里记录的宿主版本），面板直接显示"确认失效"清单，不用记得敲命令。
+- **会失效就给命令** —— 市场最新版声明覆盖目标版本时，直接给出可复制的一行 `dsh plugin --profile <name> add <包>@<版本>`；覆盖不了就不给，免得乱指挥。
 - **历史账本** `ledger` —— 每次检查的宿主版本、目标版本、逐插件结论都留档，可回看。
 - **发布时效预警** `freshness` —— 判定某个版本是否还在 pnpm 的 `minimumReleaseAge` 等待期内，顺便告诉你豁免清单和 registry 是从哪读的。
+  `check` 已经顺手查了这条信息，面板和徽章会直接标出"新版还在等待期，现在装会被拒"。
 - **零依赖** —— 只 import `node:*` 内置模块。插件经由 symlink 装进 profile 时，从真实路径出发找不到宿主 node_modules，所以不 import 任何 `@deepseek-ai/*`。
 - **自带 semver 子集** —— 以 node-semver 为基准做完差分测试（1184 组，0 处不一致），而不是抄一个近似实现。
 
@@ -206,7 +209,8 @@ npm test
 | `test/mount.mjs` | 假 ctx 挂载：工具形状、无损 JSON 输出、命令注册、disposer 注销、缺服务降级 |
 | `test/freshness.mjs` | 等待期窗口四种读法、豁免清单解析、三个判定分支 |
 | `test/projection.mjs` | 投影契约形状、`apply` 纯函数性、缺快照兜底、无损 JSON、快照合并语义 |
-| `test/client-mount.mjs` | 假模块加载器 + 假 ctx + 假 localStorage：两个槽位注册、五种数据状态下渲染不炸、徽章文案与可点性、我已知晓与指纹失效 |
+| `test/client-mount.mjs` | 假模块加载器 + 假 ctx + 假 localStorage：两个槽位注册、五种数据状态下渲染不炸、徽章文案与可点性、我已知晓与指纹失效、等待期提示条与修复命令 |
+| `test/upgrade-path.mjs` | 修复命令只给 `covers === true` 的插件；等待期与命令进快照且是无损 JSON；复核里 `hostVersion` 不丢；自动复核的触发条件 |
 | `test/matrix.mjs` | 真机多目标版本矩阵（需要真实宿主） |
 | `test/smoke.mjs` | 真机单次冒烟 |
 

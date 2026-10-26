@@ -78,10 +78,35 @@ const sampleView = {
   verdict: { action: 'caution', summary: '4 个相容 / 1 个无法判断', label: '可以更新，但有插件无法判断' },
   counts: { ok: 4, break: 0, unknown: 1 },
   plugins: [
-    { name: 'dsh-cline-pass', version: '0.2.12', status: 'OK', label: '相容', reason: null },
+    { name: 'dsh-cline-pass', version: '0.2.12', status: 'OK', label: '相容', reason: null, fix: null },
     { name: 'billion-context', version: '0.1.208', status: 'UNKNOWN', label: '无法判断', reason: '没有任何 dsh 兼容声明' },
+    { name: 'dsh-ops', version: '0.4.1', status: 'BREAK', label: '会失效', reason: '声明 ^0.2.0-rc.2 不含 0.3.0',
+      fix: 'dsh plugin --profile web add dsh-ops@0.4.2' },
   ],
+  releaseAge: {
+    window: { minutes: 1440, source: 'pnpm default' },
+    // 两个小时前发布、等待期 24 小时 → 界面上永远还有约 22 小时
+    items: [{ name: 'dshmarket', version: '1.70.3', publishedAt: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), windowMs: 86400000 }],
+  },
   audit: { hostVersion: '0.3.0', previousHost: '0.2.1-rc.2', versionChanged: true, broken: [{ name: 'dshmarket', version: '1.70.2' }], fixed: [] },
+};
+
+/** 在元素树里找 props.plugin.name === name 的 PluginRow 元素（假 react 不会执行子组件）。 */
+const findPluginRow = (node, name) => {
+  if (node == null || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findPluginRow(child, name);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (typeof node.type === 'function' && node.props && node.props.plugin && node.props.plugin.name === name) return node;
+  for (const child of node.children ?? []) {
+    const hit = findPluginRow(child, name);
+    if (hit) return hit;
+  }
+  return null;
 };
 
 const cases = [
@@ -183,3 +208,29 @@ const safePanel = CompatGatePanel({ useProjection: () => cleanView });
 assert.ok(safePanel, '全部相容时面板仍可渲染');
 
 console.log('client 挂载测试通过：2 个槽位（session 作用域）/ 5 种数据状态 / 徽章文案与可点性 / 我已知晓 / 文案助手');
+// ── 等待期与修复命令（v0.2.4）──
+
+const { ageItemsOf, describeWait, PluginRow } = exports_.__internals;
+const ages = ageItemsOf(sampleView);
+assert.equal(ages.length, 1, '只算还没过等待期的版本');
+assert.ok(ages[0].remainingMs > 21 * 3600 * 1000 && ages[0].remainingMs < 23 * 3600 * 1000, '剩余时间应约 22 小时');
+assert.equal(ageItemsOf({ releaseAge: { items: [{ name: 'x', version: '1', publishedAt: '2020-01-01T00:00:00.000Z', windowMs: 86400000 }] } }).length, 0, '早过了等待期的要过滤掉');
+assert.equal(ageItemsOf({ releaseAge: { items: [{ name: 'x', version: '1', publishedAt: 'bad', windowMs: 86400000 }] } }).length, 0, '时间读不出来的不算');
+assert.equal(ageItemsOf({}).length, 0);
+assert.equal(describeWait(22 * 3600 * 1000), '22 小时');
+assert.equal(describeWait(90 * 60000), '1 小时 30 分钟');
+assert.equal(describeWait(120000), '2 分钟');
+
+const panelText = textOf(CompatGatePanel({ useProjection: () => sampleView }));
+assert.match(panelText, /还在 pnpm 等待期内/, '面板要显示等待期提示条');
+assert.match(panelText, /dshmarket@1.70.3 还要等/, '等待期提示要带版本与剩余时间');
+// 命令在 PluginRow 内部，父元素文本里看不到，直接渲染那一行来断言
+assert.match(textOf(PluginRow({ plugin: sampleView.plugins[2], index: 2 })), /dsh plugin --profile web add dsh-ops@0.4.2/, '会失效的插件要给可复制的修复命令');
+assert.ok(!textOf(PluginRow({ plugin: sampleView.plugins[0], index: 0 })).includes('先升级'), '没有修复命令的行不显示"先升级"');
+const opsRow = findPluginRow(CompatGatePanel({ useProjection: () => sampleView }), 'dsh-ops');
+assert.ok(opsRow, '插件行必须渲染');
+assert.equal(opsRow.props.plugin.fix, 'dsh plugin --profile web add dsh-ops@0.4.2', '插件行要带上修复命令');
+
+const badge = Badge({ useProjection: () => sampleView });
+assert.match(textOf(badge), /等待期 1/, '徽章文案要带上还在等待期的版本数');
+assert.ok(!textOf(Badge({ useProjection: () => ({ ...sampleView, releaseAge: { items: [] } }) })).includes('等待期'), '没有等待期就不提');

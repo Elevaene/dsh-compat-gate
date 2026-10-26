@@ -9,7 +9,10 @@
  * 另有一份状态快照（lib/status.js）+ 一个会话投影（lib/projection.js），
  * 让 Web 客户端不执行命令也能看到最近一次判定的结论；界面在 client.js。
  */
-import { analyze, audit, formatAudit, formatFreshness, formatLedger, formatReport, freshness, PLUGIN_ID } from './lib/gate.js';
+import {
+  analyze, audit, formatAudit, formatFreshness, formatLedger, formatReport, freshness,
+  hostVersion, ledgerHostSnapshot, needsAudit, PLUGIN_ID,
+} from './lib/gate.js';
 import { compatGateDefinition } from './lib/projection.js';
 import { publishStatus, refreshStatus, summarizeAudit, summarizeReport } from './lib/status.js';
 
@@ -39,7 +42,7 @@ function slimReport(report) {
     targetSource: report.target.source,
     action: report.verdict.action,
     summary: report.verdict.summary,
-    plugins: report.plugins.map((p) => ({ name: p.name, version: p.version, status: p.status, reasons: p.reasons })),
+    plugins: report.plugins.map((p) => ({ name: p.name, version: p.version, status: p.status, reasons: p.reasons, fix: p.fix ?? null })),
   };
 }
 
@@ -162,9 +165,30 @@ export function apply(ctx, config = {}) {
   try {
     ctx.effect(() => {
       let alive = true;
-      const timer = setTimeout(() => {
+      // 账本里上次记录的宿主版本与当前运行的不一样 = dsh 刚更新过，
+      // 于是先自动补一次"更新后复核"（纯本地判定、不联网、不花额度），
+      // 再把面板刷到"下一跳"的预测上。
+      const timer = setTimeout(async () => {
         if (!alive) return;
-        refreshStatus({ timeoutMs: 8000, source: 'startup' }).catch(() => {});
+        const host = hostVersion();
+        const last = ledgerHostSnapshot();
+        const baseline = !last.lastHost;
+        const updated = needsAudit(host, last.lastHost);
+        if (updated) {
+          try {
+            const result = await audit({ persist: true });
+            const summarized = summarizeAudit(result);
+            if (summarized && alive) publishStatus(summarized);
+          } catch { /* 复核失败不影响后面的预测刷新 */ }
+        }
+        if (!alive) return;
+        // 账本还空着就留一条基线：否则以后真更新了也没有"上一次"可比，
+        // 自动复核永远不会触发。之后的启动保持 persist=false，账本不被刷屏。
+        await refreshStatus({
+          timeoutMs: 8000,
+          source: updated ? 'startup-after-update' : 'startup',
+          persist: baseline,
+        }).catch(() => {});
       }, 3000);
       if (typeof timer.unref === 'function') timer.unref();
       return () => {

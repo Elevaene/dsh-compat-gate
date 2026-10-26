@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.3';
+    const VERSION = '0.2.4';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -117,6 +117,32 @@ window.__ModuleLoader__.load({
       return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
     }
 
+    /**
+     * 还在 pnpm 最短发布等待期内的新版本。剩余时间由界面现算：
+     * 快照里存"发布于 + 等待期"，不存 remainingMs，否则三分钟后就过期。
+     */
+    function ageItemsOf(view, now = Date.now()) {
+      const list = view && view.releaseAge && Array.isArray(view.releaseAge.items) ? view.releaseAge.items : [];
+      const out = [];
+      for (const item of list) {
+        const published = item && item.publishedAt ? Date.parse(item.publishedAt) : NaN;
+        const windowMs = item && typeof item.windowMs === 'number' ? item.windowMs : null;
+        if (!Number.isFinite(published) || windowMs === null) continue;
+        const remainingMs = published + windowMs - now;
+        if (remainingMs <= 0) continue;
+        out.push({ name: item.name || '?', version: item.version || null, remainingMs });
+      }
+      return out;
+    }
+
+    function describeWait(ms) {
+      const minutes = Math.max(1, Math.ceil(ms / 60000));
+      if (minutes < 60) return minutes + ' 分钟';
+      const hours = Math.floor(minutes / 60);
+      const rest = minutes % 60;
+      return rest ? hours + ' 小时 ' + rest + ' 分钟' : hours + ' 小时';
+    }
+
     function chip(text, color) {
       return el('span', {
         style: {
@@ -141,7 +167,10 @@ window.__ModuleLoader__.load({
             el('span', { style: { fontWeight: 600 } }, p.name || '(未命名)'),
             el('span', { style: { opacity: 0.6, marginLeft: 6 } }, p.version ? String(p.version) : ''),
             el('span', { style: { marginLeft: 8 } }, chip(p.label || p.status || '未知', color))),
-          p.reason ? el('div', { style: { fontSize: 12, opacity: 0.72, marginTop: 2, wordBreak: 'break-word' } }, p.reason) : null));
+          p.reason ? el('div', { style: { fontSize: 12, opacity: 0.72, marginTop: 2, wordBreak: 'break-word' } }, p.reason) : null,
+          p.fix ? el('div', { style: { fontSize: 12, marginTop: 3, wordBreak: 'break-all' } },
+            el('span', { style: { opacity: 0.6 } }, '先升级：'),
+            el('code', { style: { padding: '1px 6px', borderRadius: 4, background: 'rgba(148,163,184,0.16)', userSelect: 'all' } }, p.fix)) : null));
     }
 
     /** 数量小结：相容 / 会失效 / 无法判断。 */
@@ -196,6 +225,7 @@ window.__ModuleLoader__.load({
       const tone = toneOf(view);
       const audit = view.audit;
       const plugins = Array.isArray(view.plugins) ? view.plugins : [];
+      const ages = ageItemsOf(view);
       useAckTick();
       return el('div', { style: { padding: 16, fontFamily: 'inherit', color: 'inherit', lineHeight: 1.6, overflow: 'auto' } },
         el('div', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
@@ -207,6 +237,12 @@ window.__ModuleLoader__.load({
           el('span', { style: { opacity: 0.6 } }, '版本 '), describeTarget(view)),
         el('div', { style: { marginTop: 4, fontSize: 13, opacity: 0.85 } }, describeVerdict(view)),
         countRow(view),
+        ages.length
+          ? el('div', { style: { marginTop: 10, padding: '6px 10px', borderRadius: 8, fontSize: 12, color: '#b45309',
+              background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.35)' } },
+              el('div', null, '⚠ ' + ages.length + ' 个插件的新版还在 pnpm 等待期内，现在装会被拒'),
+              ages.map((item, i) => el('div', { key: 'age' + i, style: { marginTop: 2, opacity: 0.9 } },
+                item.name + (item.version ? '@' + item.version : '') + ' 还要等 ' + describeWait(item.remainingMs)))) : null,
         audit ? el('div', { style: { marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(148,163,184,0.1)', fontSize: 13 } },
           el('div', { style: { fontWeight: 600 } }, '更新后复核'),
           el('div', null, '上次记录宿主 ' + (audit.previousHost || '—') + '，当前 ' + (audit.hostVersion || '—') + (audit.versionChanged ? '（已变化）' : '（未变化）')),
@@ -240,7 +276,8 @@ window.__ModuleLoader__.load({
       const tone = toneOf(view);
       const counts = (view && view.counts) || {};
       const risky = (counts.break || 0) + (counts.unknown || 0);
-      const text = LABEL + ' · ' + (risky ? risky + ' 项待看' : '需留意');
+      const ages = ageItemsOf(view);
+      const text = LABEL + ' · ' + (risky ? risky + ' 项待看' : '需留意') + (ages.length ? ' · 等待期 ' + ages.length : '');
       const base = {
         display: 'inline-flex', alignSelf: 'flex-start', flex: '0 0 auto', width: 'fit-content', maxWidth: '100%',
         alignItems: 'center', gap: 6, margin: '0 0 4px 0', padding: '2px 9px', fontSize: 12, lineHeight: 1.5,
@@ -286,7 +323,10 @@ window.__ModuleLoader__.load({
     exports.name = PLUGIN_ID;
     exports.inject = inject;
     exports.apply = apply;
-    exports.__internals = { describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow, fingerprintOf, acknowledged, PROJECTION_KEY, VIEW_ID };
+    exports.__internals = {
+      describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow,
+      fingerprintOf, acknowledged, ageItemsOf, describeWait, PluginRow, PROJECTION_KEY, VIEW_ID,
+    };
     return module.exports;
   },
 });
