@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-    const VERSION = '0.2.4';
+    const VERSION = '0.2.5';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -83,6 +83,133 @@ window.__ModuleLoader__.load({
     function acknowledged(view) {
       const fp = fingerprintOf(view);
       return fp !== '' && readAck() === fp;
+    }
+    // ── 在界面里直接更新 dsh：桌面应用把更新器暴露成 window.dshDesktop.updates ──
+    /** 只有桌面窗口（dsh-app://app 主框架）才有这个桥；用浏览器打开 profile 时为 null。 */
+    function updateBridge() {
+      try {
+        const win = typeof window === 'undefined' ? null : window;
+        const updates = win && win.dshDesktop ? win.dshDesktop.updates : null;
+        if (!updates || typeof updates.open !== 'function') return null;
+        return updates;
+      } catch (error) {
+        return null;
+      }
+    }
+
+    const UPDATE_PHASE_TEXT = {
+      idle: '还没检查过更新',
+      checking: '正在检查更新…',
+      available: '发现新版本，准备下载…',
+      downloading: '正在下载更新',
+      ready: '已下载完成，dsh 即将重启安装',
+      error: '更新过程出错',
+    };
+
+    // 宿主把自己更新器的状态推给所有窗口，这里缓存最近一次，任何挂载点都能复用。
+    let updatePhase = null;
+    const updatePhaseListeners = new Set();
+
+    function describePhase(state) {
+      if (!state || typeof state.phase !== 'string' || state.phase === '') return '';
+      const base = UPDATE_PHASE_TEXT[state.phase] || state.phase;
+      if (state.phase === 'downloading' && typeof state.percent === 'number') return base + ' ' + state.percent + '%';
+      if (state.phase === 'available' && state.version) return '发现新版本 ' + state.version + '，准备下载…';
+      if (state.phase === 'error' && state.failure) return base + '（' + state.failure + '）';
+      return base;
+    }
+
+    function setUpdatePhase(state) {
+      updatePhase = state && typeof state.phase === 'string' ? state : null;
+      updatePhaseListeners.forEach((fn) => fn());
+    }
+
+    function describeFailure(error) {
+      const message = error && error.message ? String(error.message) : '';
+      return message === '' ? 'open-failed' : message;
+    }
+
+    /**
+     * 把更新交给宿主自己的更新器：检查 → 下载 → 关闭重启，全程由桌面应用负责。
+     * 我们只负责按一下——插件跑在服务端进程里，碰不到 electron-updater。
+     */
+    function startUpdate(bridge) {
+      if (!bridge || typeof bridge.open !== 'function') return Promise.resolve(false);
+      setUpdatePhase({ phase: 'checking' });
+      try {
+        return Promise.resolve(bridge.open()).then(() => true).catch((error) => {
+          setUpdatePhase({ phase: 'error', failure: describeFailure(error) });
+          return false;
+        });
+      } catch (error) {
+        setUpdatePhase({ phase: 'error', failure: describeFailure(error) });
+        return Promise.resolve(false);
+      }
+    }
+
+    /** 订阅宿主更新器状态：先拉一次当前快照，再跟着 presentation 事件刷新。 */
+    function useUpdatePhase(bridge) {
+      if (!useStateHook) return updatePhase;
+      const [state, setState] = useStateHook(updatePhase);
+      if (useEffectHook) {
+        useEffectHook(() => {
+          const bump = () => setState(updatePhase);
+          updatePhaseListeners.add(bump);
+          if (bridge && typeof bridge.status === 'function') {
+            try {
+              Promise.resolve(bridge.status()).then(setUpdatePhase).catch(() => undefined);
+            } catch (error) { /* 拿不到当前状态就等推送 */ }
+          }
+          let off = null;
+          if (bridge && typeof bridge.subscribe === 'function') {
+            try { off = bridge.subscribe(setUpdatePhase); } catch (error) { off = null; }
+          }
+          return () => {
+            updatePhaseListeners.delete(bump);
+            if (typeof off === 'function') off();
+          };
+        }, []);
+      }
+      return state;
+    }
+
+    function useConfirmFlag() {
+      if (!useStateHook) return [false, () => undefined];
+      return useStateHook(false);
+    }
+
+    /** 面板里的“更新 dsh”一行：更新会关闭并自动重开 dsh，所以先确认再动手。 */
+    function UpdateRow(props) {
+      const view = (props && props.view) || null;
+      const bridge = updateBridge();
+      const phase = useUpdatePhase(bridge);
+      const [confirming, setConfirming] = useConfirmFlag();
+      const hostVersion = (view && view.host && view.host.version) || '';
+      const targetVersion = (view && view.target && view.target.version) || '';
+      const changed = targetVersion !== '' && hostVersion !== '' && targetVersion !== hostVersion;
+      const phaseText = describePhase(phase);
+      const wrap = { marginTop: 10, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12 };
+      const hint = { opacity: 0.72, flex: '1 1 auto', minWidth: 0 };
+      if (!bridge) {
+        return el('div', { style: wrap },
+          el('span', { style: hint }, '在浏览器里打开时没法直接更新，这个按钮只在桌面应用窗口里可用。'));
+      }
+      const label = changed ? '更新 dsh 到 ' + targetVersion : '检查 dsh 更新';
+      const buttonStyle = {
+        font: 'inherit', fontSize: 12, padding: '3px 12px', borderRadius: 999, cursor: 'pointer',
+        border: '1px solid rgba(16,185,129,0.5)', background: 'rgba(16,185,129,0.14)', color: 'inherit', whiteSpace: 'nowrap',
+      };
+      const ghostStyle = { ...buttonStyle, border: '1px solid rgba(148,163,184,0.45)', background: 'transparent' };
+      if (confirming) {
+        return el('div', { style: wrap },
+          el('span', { style: hint }, '更新会关闭 dsh 并自动重开，没保存的内容会丢。现在更新？'),
+          el('button', { type: 'button', onClick: () => { setConfirming(false); startUpdate(bridge); }, style: buttonStyle }, '确认更新'),
+          el('button', { type: 'button', onClick: () => setConfirming(false), style: ghostStyle }, '取消'));
+      }
+      return el('div', { style: wrap },
+        el('span', { style: hint }, '更新交给桌面应用自己做：检查、下载、重启都在窗口里完成，不用再去终端敲命令。'),
+        phaseText ? el('span', { style: { color: '#10b981' } }, phaseText) : null,
+        el('button', { type: 'button', onClick: () => setConfirming(true), style: buttonStyle }, label));
     }
 
     function toneOf(view) {
@@ -236,6 +363,7 @@ window.__ModuleLoader__.load({
         el('div', { style: { marginTop: 10, fontSize: 13 } },
           el('span', { style: { opacity: 0.6 } }, '版本 '), describeTarget(view)),
         el('div', { style: { marginTop: 4, fontSize: 13, opacity: 0.85 } }, describeVerdict(view)),
+        el(UpdateRow, { key: 'update', view }),
         countRow(view),
         ages.length
           ? el('div', { style: { marginTop: 10, padding: '6px 10px', borderRadius: 8, fontSize: 12, color: '#b45309',
@@ -326,6 +454,7 @@ window.__ModuleLoader__.load({
     exports.__internals = {
       describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow,
       fingerprintOf, acknowledged, ageItemsOf, describeWait, PluginRow, PROJECTION_KEY, VIEW_ID,
+      UpdateRow, updateBridge, describePhase, startUpdate,
     };
     return module.exports;
   },

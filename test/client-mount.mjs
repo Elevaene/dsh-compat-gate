@@ -234,3 +234,32 @@ assert.equal(opsRow.props.plugin.fix, 'dsh plugin --profile web add dsh-ops@0.4.
 const badge = Badge({ useProjection: () => sampleView });
 assert.match(textOf(badge), /等待期 1/, '徽章文案要带上还在等待期的版本数');
 assert.ok(!textOf(Badge({ useProjection: () => ({ ...sampleView, releaseAge: { items: [] } }) })).includes('等待期'), '没有等待期就不提');
+
+// ── 界面里直接更新 dsh（v0.2.5）：桥只在桌面窗口里有，浏览器打开时要说清原因 ──
+const { UpdateRow, updateBridge, describePhase, startUpdate } = exports_.__internals;
+assert.equal(updateBridge(), null, '浏览器里没有 window.dshDesktop，桥必须是 null');
+assert.match(textOf(UpdateRow({ view: sampleView })), /没法直接更新/, '没有桥时要说明为什么没有按钮');
+assert.ok(hasComponent(CompatGatePanel({ useProjection: () => sampleView }), UpdateRow), '面板里要挂上更新那一行');
+
+const updateCalls = [];
+globalThis.window.dshDesktop = {
+  updates: {
+    open: () => { updateCalls.push("open"); return Promise.resolve(); },
+    status: () => Promise.resolve({ phase: 'idle' }),
+    subscribe: () => () => undefined,
+  },
+};
+assert.ok(updateBridge(), '桌面窗口里能拿到更新桥');
+assert.match(textOf(UpdateRow({ view: sampleView })), /更新 dsh 到 0\.2\.1-rc\.3/, '目标版本更高时按钮写明升到哪个版本');
+assert.match(textOf(UpdateRow({ view: { host: { version: '0.2.1-rc.2' }, target: { version: '0.2.1-rc.2' } } })), /检查 dsh 更新/, '没有新版本时按钮退化成检查更新');
+assert.equal(await startUpdate(updateBridge()), true, '点击更新要把请求交给宿主更新器');
+assert.equal(updateCalls.length, 1, '宿主更新器只被调用一次');
+assert.equal(await startUpdate({ open: () => Promise.reject(new Error('boom')) }), false, '宿主拒绝时要返回 false');
+assert.match(describePhase({ phase: 'error', failure: 'boom' }), /boom/, '错误原因要带出来');
+assert.equal(await startUpdate(null), false, '没有桥时什么都不做');
+assert.equal(describePhase({ phase: 'downloading', percent: 42 }), '正在下载更新 42%');
+assert.equal(describePhase({ phase: 'available', version: '9.9.9' }), '发现新版本 9.9.9，准备下载…');
+assert.equal(describePhase(null), '');
+delete globalThis.window.dshDesktop;
+
+console.log('更新按钮测试通过：桥探测 / 按钮文案 / 交给宿主更新器 / 错误与阶段文案');
