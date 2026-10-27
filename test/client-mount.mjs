@@ -289,3 +289,19 @@ assert.match(noAuditText, /（已变化）/, '账本版本与当前不同时要�
 const noLedgerView = { ...breakView, audit: undefined, lastHost: null };
 assert.match(textOf(CompatGatePanel({ useProjection: () => noLedgerView })), /上次记录宿主 —/, '账本真没有记录时才显示短横');
 console.log('v0.2.7 通过：账本上次宿主回填');
+
+// ── v0.2.9：安装不完整时面板顶上给红字，完整时不打扰 ──
+{
+  const { IntegrityBar } = exports_.__internals;
+  const broken = IntegrityBar({ view: { integrity: { ok: false, missing: ['Office 技能总览', '运行时 node'], note: null } } });
+  const brokenText = textOf(broken);
+  assert.match(brokenText, /安装可能不完整/, '缺文件要有红字');
+  assert.match(brokenText, /Office 技能总览/, '缺哪几项要点名');
+  assert.match(brokenText, /官方安装包/, '要告诉用户拿安装包修，别再点更新');
+  assert.equal(IntegrityBar({ view: { integrity: { ok: true, missing: [], note: null } } }), null, '文件齐时不打扰');
+  assert.equal(IntegrityBar({ view: {} }), null, '没有检查结果时不渲染');
+  const drift = textOf(IntegrityBar({ view: { integrity: { ok: true, missing: [], note: '程序是 0.2.1-rc.4，运行时数据是 0.2.1-rc.3，两者不一致' } } }));
+  assert.match(drift, /不一致/, '版本漂移也要提示');
+  assert.ok(hasComponent(CompatGatePanel({ useProjection: () => ({ ...breakView, integrity: { ok: false, missing: ['运行时 node'] } }) }), IntegrityBar), '面板里要挂上这一条');
+  console.log('v0.2.9 通过：安装完整性红字条');
+}

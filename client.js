@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-const VERSION = '0.2.8';
+const VERSION = '0.2.9';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -323,6 +323,20 @@ const VERSION = '0.2.8';
       return total ? parts.join('，') + '（共 ' + total + ' 个插件）' : parts.join('，');
     }
 
+    /** 安装不完整时的一句红字：桌面版缺 runtime 文件会直接启动失败。 */
+    function IntegrityBar(props) {
+      const integrity = props && props.view ? props.view.integrity : null;
+      if (!integrity) return null;
+      const missing = Array.isArray(integrity.missing) ? integrity.missing : [];
+      const broken = integrity.ok === false || missing.length > 0;
+      if (!broken && !integrity.note) return null;
+      return el('div', { style: { marginTop: 10, padding: '8px 10px', borderRadius: 8, fontSize: 12, color: '#b91c1c', background: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.35)' } },
+        broken
+          ? el('div', null, '安装可能不完整：缺 ' + (missing.join('、') || '必需文件') + '。这种状态下 dsh 可能启动失败，先用同版本官方安装包修复，别用更新按钮。')
+          : null,
+        integrity.note ? el('div', { style: { marginTop: 4, opacity: 0.8 } }, integrity.note) : null);
+    }
+
     function describeTarget(view) {
       if (!view || view.ok === false) return '—';
       const host = view.host && view.host.version ? view.host.version : '未知宿主';
@@ -459,6 +473,7 @@ const VERSION = '0.2.8';
           el('span', { style: { padding: '2px 10px', borderRadius: 999, fontSize: 12, color: tone.fg, background: tone.bg, border: '1px solid ' + tone.fg + '44' } },
             view.verdict && view.verdict.label ? view.verdict.label : tone.tag),
           el('span', { style: { fontSize: 12, opacity: 0.55 } }, 'v' + VERSION)),
+        el(IntegrityBar, { key: 'integrity', view }),
         el('div', { style: { marginTop: 10, fontSize: 13 } },
           el('span', { style: { opacity: 0.6 } }, '版本 '), describeTarget(view)),
         el('div', { style: { marginTop: 4, fontSize: 13, opacity: 0.85 } }, describeVerdict(view)),
@@ -553,7 +568,7 @@ const VERSION = '0.2.8';
     exports.__internals = {
       describeVerdict, describeTarget, toneOf, timeText, CompatGatePanel, CompatGateBadge, countRow, AckRow,
       fingerprintOf, acknowledged, ageItemsOf, describeWait, PluginRow, PROJECTION_KEY, VIEW_ID,
-      UpdateRow, updateBridge, describePhase, startUpdate, ackStorageKind, diagnosticText,
+      UpdateRow, updateBridge, describePhase, startUpdate, IntegrityBar, ackStorageKind, diagnosticText,
     };
     return module.exports;
   },
