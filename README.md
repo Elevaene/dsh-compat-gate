@@ -24,6 +24,7 @@ dsh 生态里，宿主和插件各自跑各自的版本线。每次 dsh 提示"�
   dsh 更新完第一次启动时会自动跑一次（比对账本里记录的宿主版本），面板直接显示"确认失效"清单，不用记得敲命令。
   没触发复核时（宿主版本没变），那一栏照样显示账本里记着的上次宿主，不会退化成两个短横让人以为没记住。
 - **会失效就给命令** —— 市场最新版声明覆盖目标版本时，直接给出可复制的一行 `dsh plugin --profile <name> add <包>@<版本>`；覆盖不了就不给，免得乱指挥。
+- 宿主版本怎么找：环境变量 → `require.resolve` → 可执行文件往上找 `resources/app` —— 桌面版把 dsh 树放在 `resources/app.asar`（没有 `resources/app` 这个目录），所以 `resources` 里真实存在的 `app` / `app.asar` 都会被试；都读不到才退到最后一条：`resources/runtime/primary-runtime/runtime.json` 里的 `desktopVersion`。
 - **历史账本** `ledger` —— 每次检查的宿主版本、目标版本、逐插件结论都留档，可回看。
 - **发布时效预警** `freshness` —— 判定某个版本是否还在 pnpm 的 `minimumReleaseAge` 等待期内，顺便告诉你豁免清单和 registry 是从哪读的。
   `check` 已经顺手查了这条信息，面板和徽章会直接标出"新版还在等待期，现在装会被拒"。
@@ -245,6 +246,7 @@ test/               离线测试与真机冒烟
 
 | 版本 | 变化 |
 |---|---|
+| 0.2.8 | 认桌面版的 `resources/app.asar`（此前只探 `resources/app`，桌面端因此全报"宿主版本未识别"）；读不到包版本时用 `runtime.json` 里的 `desktopVersion` 兜底 |
 | 0.2.1 | 面板挂到会话视图标签页；徽章改紧凑胶囊，宿主给 `openView` 时可点 |
 | 0.2.2 | 徽章只在确实需要留意时出现，全部相容就不打扰 |
 | 0.2.3 | 「我已知晓」+ 指纹失效：dsh 或插件有变化才重新提醒 |

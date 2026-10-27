@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
     const el = react.createElement;
 
     const PLUGIN_ID = 'dsh-compat-gate';
-const VERSION = '0.2.7';
+const VERSION = '0.2.8';
     const PROJECTION_KEY = 'compatGate';
     const VIEW_ID = 'compat-gate';
     const LABEL = '兼容闸门';
@@ -32,6 +32,7 @@ const VERSION = '0.2.7';
     const TONE = {
       safe: { fg: '#10b981', bg: 'rgba(16,185,129,0.12)', tag: '可以更新' },
       caution: { fg: '#f59e0b', bg: 'rgba(245,158,11,0.12)', tag: '需留意' },
+      current: { fg: '#10b981', bg: 'rgba(16,185,129,0.12)', tag: '已经是最新' },
       defer: { fg: '#ef4444', bg: 'rgba(239,68,68,0.12)', tag: '建议暂缓' },
       unknown: { fg: '#94a3b8', bg: 'rgba(148,163,184,0.12)', tag: '无法判定' },
     };

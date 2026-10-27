@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  DEFAULT_RELEASE_AGE_MS, NPM_CHINA, describeAge, detectProfile, evaluateReleaseAge,
+  DEFAULT_RELEASE_AGE_MS, NPM_CHINA, NPM_GLOBAL, describeAge, detectProfile, evaluateReleaseAge,
   exclusionOf, formatFreshness, freshness, isNonRegistrySpec, readRegistry,
   readReleaseAgeExcludes, readReleaseAgeWindow,
 } from '../lib/gate.js';
@@ -48,10 +48,16 @@ const profile = detectProfile();
 assert.ok(profile.dir, '真 profile 应能定位');
 const excludes = readReleaseAgeExcludes(profile.dir);
 console.log('真 profile 豁免清单：', excludes);
-assert.deepEqual(excludes, ['billion-context@0.1.208', 'dsh-cline-pass@0.2.12']);
+// 豁免清单随 profile 变化（web 有 2 条，desktop 有 4 条），只锁格式与已知条目，不锁全等
+assert.ok(excludes.includes('billion-context@0.1.208'), 'billion-context 必须在豁免清单里');
+assert.ok(excludes.includes('dsh-cline-pass@0.2.12'), 'dsh-cline-pass 必须在豁免清单里');
+for (const item of excludes) {
+  const at = item.lastIndexOf('@');
+  assert.ok(at > 0 && at < item.length - 1, '豁免条目应是 名字@版本：' + item);
+}
 const registry = readRegistry(profile.dir);
-assert.equal(registry.url, NPM_CHINA);
-assert.equal(registry.region, 'china');
+// 桌面 profile 没有 .npmrc 时会落回默认源，所以只锁是已知源之一
+assert.ok([NPM_CHINA, NPM_GLOBAL].includes(registry.url), 'registry 应是已知源之一：' + registry.url);
 console.log(`✓ registry = ${registry.url}（${registry.source}）`);
 
 // ── 3) 豁免匹配：裸名 / 精确版本 / 范围 ──
@@ -92,7 +98,9 @@ write(fake, 'node_modules/dshmarket/package.json', JSON.stringify({ name: 'dshma
 write(fake, 'pnpm-workspace.yaml', 'packages:\n  - .\nminimumReleaseAge: 100000\n');
 process.env.DSHM_REGISTRY_URL = NPM_CHINA;
 const held = await freshness({ profileDir: fake, names: ['dshmarket'] });
-assert.equal(held.rows[0].verdict, 'holds-lockfile', JSON.stringify(held.rows[0]));
+// registry 里 latest 会随时间前移，所以这里只看"装的是不是最新"对应的结论，不写死时间点
+const row6 = held.rows[0];
+assert.equal(row6.verdict, row6.version === row6.installed ? 'holds-lockfile' : 'too-young', JSON.stringify(row6));
 console.log('\n【伪 profile：等待期 69 天，已装同版本】');
 console.log(formatFreshness(held));
 
@@ -104,7 +112,7 @@ assert.ok(youngRow.rows[0].remainingMs > 0);
 console.log('\n✓ 已装落后且新版太新 → too-young，剩余 ' + describeAge(youngRow.rows[0].remainingMs));
 
 // ── 8) 写进豁免清单后放行 ──
-write(fake, 'pnpm-workspace.yaml', 'packages:\n  - .\nminimumReleaseAge: 100000\nminimumReleaseAgeExclude:\n  - dshmarket@1.70.2\n');
+write(fake, 'pnpm-workspace.yaml', 'packages:\n  - .\nminimumReleaseAge: 100000\nminimumReleaseAgeExclude:\n  - dshmarket@' + row6.version + '\n');
 assert.equal((await freshness({ profileDir: fake, names: ['dshmarket'] })).rows[0].verdict, 'exempt');
 console.log('✓ minimumReleaseAgeExclude 命中 → exempt');
 
@@ -114,8 +122,14 @@ const real = await freshness();
 console.log('\n【真 profile 全量】');
 console.log(formatFreshness(real));
 const byName = new Map(real.rows.map((row) => [row.name, row]));
-assert.equal(byName.get('billion-context').verdict, 'exempt');
-assert.equal(byName.get('dsh-cline-pass').verdict, 'exempt');
+// 豁免条目写的是精确版本（xxx@1.2.3），插件又发了新版本时就不再命中，
+// 所以这里只锁"结论合法"，不锁具体值——否则一个上游发版就把测试打红。
+const allowed = ['exempt', 'ready', 'too-young', 'holds-lockfile', 'unknown-time'];
+for (const name of ['billion-context', 'dsh-cline-pass']) {
+  const row = byName.get(name);
+  assert.ok(row, name + ' 应该出现在真 profile 的清单里');
+  assert.ok(allowed.includes(row.verdict), name + ' 的结论应该是合法值，实际 ' + row.verdict);
+}
 assert.equal(byName.get('dsh-token-metrics').verdict, 'not-registry');
 assert.equal(byName.get('dsh-infinite-gen-5').verdict, 'not-registry');
 assert.ok(['ready', 'too-young', 'holds-lockfile'].includes(byName.get('dshmarket').verdict));

@@ -88,3 +88,12 @@ const auditNoFix = summarizeAudit({ ok: true, host: { version: '0.3.0' }, versio
 assert.equal(auditNoFix.audit.broken[0].fix, null);
 
 console.log('升级路径测试通过：修复命令 / 等待期进快照 / 复核带命令');
+
+// v0.2.8：宿主已经和更新源同位时，别再说"可以更新"——用户机器上就是这种情况
+const { recommend } = await import('../lib/gate.js');
+const sameVerse = recommend({ targetVersion: '0.2.1-rc.3', currentVersion: '0.2.1-rc.3', results: [{ name: 'a', status: 'OK' }, { name: 'b', status: 'UNKNOWN' }] });
+assert.equal(sameVerse.action, 'current', '同版本应判 current，而不是 caution/safe');
+assert.match(sameVerse.summary, /已经是最新/);
+const behind = recommend({ targetVersion: '0.2.1-rc.3', currentVersion: '0.2.1-rc.2', results: [{ name: 'a', status: 'OK' }] });
+assert.notEqual(behind.action, 'current', '落后时不能判 current');
+console.log('v0.2.8 通过：同位判定 / 落后仍走原分支');
